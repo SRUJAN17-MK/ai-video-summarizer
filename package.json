@@ -1,0 +1,27 @@
+{
+  "name": "ai-video-summarizer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI Video Summarizer & Translator - upload a video or paste a link, get an AI-powered summary in your language.",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,magenta \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "dev:backend": "npm run dev -w backend",
+    "dev:frontend": "npm run dev -w frontend",
+    "build": "npm run build -w backend && npm run build -w frontend",
+    "start": "npm run start -w backend",
+    "typecheck": "npm run typecheck -w backend && npm run typecheck -w frontend",
+    "test:e2e": "node scripts/e2e.mjs",
+    "test:ui": "node scripts/ui-test.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "puppeteer-core": "^23.11.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

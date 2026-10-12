@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# builds
+dist/
+backend/dist/
+frontend/dist/
+
+# environment (never commit real keys)
+.env
+backend/.env
+.env.local
+
+# runtime temp files (uploads, extracted audio, cleanup store)
+.tmp/
+.tmp-e2e/
+.tmp-ui/
+
+# logs
+logs/
+*.log
+.tmp-*.log
+
+# generated test fixtures (regenerate with scripts/generate-samples.ps1)
+testdata/*.wav
+testdata/ui-*.png
