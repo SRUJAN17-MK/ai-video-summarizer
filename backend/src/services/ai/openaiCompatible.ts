@@ -147,7 +147,7 @@ export class OpenAICompatibleProvider implements AIProvider {
 
   // -------------------------------------------------------- summarization ----
   async summarize(input: { transcript: string; languageName?: string }): Promise<SummaryResult> {
-    const raw = await this.chat(summarizationPrompt(input.languageName), { json: true });
+    const raw = await this.chat(summarizationPrompt(input.languageName, input.transcript), { json: true });
     const parsed = parseJsonObject(raw);
     const summary = typeof parsed?.summary === 'string' ? parsed.summary.trim() : '';
     const keyPoints = Array.isArray(parsed?.keyPoints)
@@ -210,15 +210,20 @@ async function safeText(res: Response): Promise<string> {
 
 export function friendlyHttpError(status: number, body: string, keyName = 'AI_API_KEY'): string {
   // Gemini reports bad keys as HTTP 400 with reason API_KEY_INVALID.
-  const invalidKey = /API_KEY_INVALID|API key not valid|incorrect API key/i.test(body);
+  const invalidKey = /API_KEY_INVALID|API key not valid|incorrect API key|invalid (api )?key/i.test(body);
   if (status === 401 || status === 403 || invalidKey) {
     return `The AI service rejected the API key. Check ${keyName} in your server configuration.`;
   }
-  if (status === 429) {
-    return 'The AI service is rate limiting requests right now. Please wait a moment and try again.';
+  const quota = /quota|resource[_ -]?exhausted|rate limit|too many requests/i.test(body);
+  if (status === 429 || quota) {
+    return 'The AI service quota or rate limit was reached. Wait a moment or check your plan/billing, then try again.';
+  }
+  const unsupportedFormat = /unsupported (file|format|mime|audio)|invalid (file|format|mime|audio)|media type|not (supported|allowed)/i.test(body);
+  if (status === 415 || (status === 400 && unsupportedFormat)) {
+    return 'This audio or video format is not supported by the configured AI service. Try a different file format (MP4 with standard codecs).';
   }
   if (status === 404) {
-    return 'The configured AI model or endpoint was not found. Check AI_BASE_URL and AI_MODEL.';
+    return 'The configured AI model or endpoint was not found. Check AI_BASE_URL, AI_MODEL, and AI_TRANSCRIPTION_MODEL.';
   }
   if (status >= 500) {
     return 'The AI service is currently unavailable. Please try again shortly.';

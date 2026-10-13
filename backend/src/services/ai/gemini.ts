@@ -39,23 +39,24 @@ export class GeminiProvider implements AIProvider {
   // ------------------------------------------------------- generateContent ----
   private async generateContent(
     prompt: string,
-    opts: { json: boolean; model?: string; timeoutMs?: number; inlineAudio?: { data: string; mime: string } },
+    opts: { json: boolean; model?: string; timeoutMs?: number; inlineAudio?: { data: string; mime: string }; systemInstruction?: boolean },
   ): Promise<string> {
     const model = opts.model ?? this.cfg.model;
     const timeoutMs = opts.timeoutMs ?? this.cfg.timeoutMs;
+    const useSystem = opts.systemInstruction !== false;
 
     const parts: Array<Record<string, unknown>> = [];
     if (opts.inlineAudio) parts.push({ inline_data: { mime_type: opts.inlineAudio.mime, data: opts.inlineAudio.data } });
     parts.push({ text: prompt });
 
     const body: Record<string, unknown> = {
-      systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
       contents: [{ role: 'user', parts }],
       generationConfig: {
         temperature: 0.2,
         ...(opts.json ? { responseMimeType: 'application/json' } : {}),
       },
     };
+    if (useSystem) body.systemInstruction = { parts: [{ text: SYSTEM_INSTRUCTION }] };
 
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -70,9 +71,12 @@ export class GeminiProvider implements AIProvider {
           timeoutMs,
         });
       } catch (err) {
+        const isTimeout = (err as any)?.name === 'AbortError' || (err as any)?.name === 'TimeoutError';
         log.warn(`generateContent request failed (attempt ${attempt + 1}/3)`, { err, model });
-        lastError = new AppError('AI_FAILED', {
-          message: 'Could not reach the Gemini API. Check the server network connection and AI_BASE_URL.',
+        lastError = new AppError(isTimeout ? 'TIMEOUT' : 'AI_FAILED', {
+          message: isTimeout
+            ? 'The AI request timed out. Try a shorter video or try again.'
+            : 'Could not reach the Gemini API. Check the server network connection and AI_BASE_URL.',
           cause: err,
         });
         continue;
@@ -99,10 +103,12 @@ export class GeminiProvider implements AIProvider {
           message: `Gemini blocked the request (${blockReason}). Please try again with a different video.`,
         });
       }
-      const text = (data?.candidates ?? [])
-        .flatMap((c: any) => c?.content?.parts ?? [])
-        .filter((p: any) => p?.thought !== true && typeof p?.text === 'string')
-        .map((p: any) => p.text as string)
+      const candidates = data?.candidates ?? [];
+      const allParts = candidates.flatMap((c: any) => c?.content?.parts ?? []);
+      const text = allParts
+        .filter((p: any) => p?.thought !== true)
+        .map((p: any) => (typeof p?.text === 'string' ? p.text : p?.audioTranscription?.text))
+        .filter((t: unknown): t is string => typeof t === 'string')
         .join('')
         .trim();
       if (!text) {
@@ -126,17 +132,26 @@ export class GeminiProvider implements AIProvider {
     const mime = audioPath.toLowerCase().endsWith('.mp3') ? 'audio/mpeg' : 'audio/wav';
 
     const raw = await this.generateContent(TRANSCRIPTION_PROMPT, {
-      json: true,
+      json: false,
+      systemInstruction: false,
       model: this.cfg.transcriptionModel,
       timeoutMs: opts.timeoutMs,
       inlineAudio: { data: buffer.toString('base64'), mime },
     });
 
+    // Newer Gemini transcription models return `audioTranscription` parts rather
+    // than JSON text, while chat models may still return JSON. Handle both.
+    let text = raw.trim();
+    let language: string | undefined;
+    let segments: TranscriptSegment[] = [];
+    let durationSec: number | undefined;
+
     const parsed = parseJsonObject(raw);
-    const text = typeof parsed?.text === 'string' ? parsed.text : '';
-    const language = typeof parsed?.language === 'string' && parsed.language.trim() ? parsed.language.trim().toLowerCase() : undefined;
-    const segments: TranscriptSegment[] = Array.isArray(parsed?.segments)
-      ? parsed.segments
+    if (parsed) {
+      if (typeof parsed.text === 'string') text = parsed.text;
+      if (typeof parsed.language === 'string' && parsed.language.trim()) language = parsed.language.trim().toLowerCase();
+      if (Array.isArray(parsed.segments)) {
+        segments = parsed.segments
           .map((s: any) => ({
             start: Number(s?.start ?? 0),
             end: Number(s?.end ?? 0),
@@ -144,16 +159,34 @@ export class GeminiProvider implements AIProvider {
           }))
           .filter((s: { start: number; end: number; text: string }) =>
             Number.isFinite(s.start) && Number.isFinite(s.end) && s.text.length > 0,
-          )
-      : [];
-    const durationSec = typeof parsed?.duration === 'number' ? parsed.duration : undefined;
+          );
+      }
+      if (typeof parsed.duration === 'number') durationSec = parsed.duration;
+    }
+
+    // Some transcription-capable Gemini models return only text; detect the
+    // spoken language with the configured chat model as a fallback.
+    if (!language && text.trim()) {
+      try {
+        const langRaw = await this.generateContent(
+          `Detect the ISO 639-1 language code of the following transcript. Respond with ONLY a JSON object in exactly this shape: {"language":"en"}\n\n${text.slice(0, 4000)}`,
+          { json: true, model: this.cfg.model, timeoutMs: opts.timeoutMs },
+        );
+        const langParsed = parseJsonObject(langRaw);
+        if (typeof langParsed?.language === 'string' && langParsed.language.trim()) {
+          language = langParsed.language.trim().toLowerCase();
+        }
+      } catch (err) {
+        log.warn('language detection failed', { err });
+      }
+    }
 
     return { text, segments, language, durationSec };
   }
 
   // -------------------------------------------------------- summarization ----
   async summarize(input: { transcript: string; languageName?: string }): Promise<SummaryResult> {
-    const raw = await this.generateContent(summarizationPrompt(input.languageName), { json: true });
+    const raw = await this.generateContent(summarizationPrompt(input.languageName, input.transcript), { json: true });
     return parseSummary(raw, 'summary', []);
   }
 

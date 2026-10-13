@@ -61,8 +61,8 @@ export const config = {
       'AI_BASE_URL',
       aiProvider === 'gemini' ? 'https://generativelanguage.googleapis.com/v1beta' : 'https://api.openai.com/v1',
     ).replace(/\/+$/, ''),
-    model: str('AI_MODEL', aiProvider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-4o-mini'),
-    transcriptionModel: str('AI_TRANSCRIPTION_MODEL', aiProvider === 'gemini' ? 'gemini-2.5-flash' : 'whisper-1'),
+    model: str('AI_MODEL', aiProvider === 'gemini' ? 'gemini-3-flash-preview' : 'gpt-4o-mini'),
+    transcriptionModel: str('AI_TRANSCRIPTION_MODEL', aiProvider === 'gemini' ? 'gemini-3.5-transcribe' : 'whisper-1'),
     timeoutMs: int('AI_TIMEOUT_MS', 120000),
   },
 

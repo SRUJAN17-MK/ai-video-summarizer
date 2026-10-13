@@ -3,7 +3,7 @@
  * the UI.
  */
 
-export function summarizationPrompt(languageName: string | undefined): string {
+export function summarizationPrompt(languageName: string | undefined, transcript?: string): string {
   const langInstruction = languageName
     ? `Write the summary and the key points in ${languageName} (the language of the transcript).`
     : 'Write the summary and key points in the same language as the transcript.';
@@ -18,7 +18,10 @@ Requirements:
 - ${langInstruction}
 
 Respond with ONLY a JSON object in exactly this shape:
-{"summary": "3-5 concise sentences describing the video", "keyPoints": ["3-7 important points, each a single line"]}`;
+{"summary": "3-5 concise sentences describing the video", "keyPoints": ["3-7 important points, each a single line"]}
+
+--- TRANSCRIPT ---
+${transcript ?? ''}`;
 }
 
 export function translationPrompt(input: {

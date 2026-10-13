@@ -114,6 +114,7 @@ export function completeJob(job: Job, result: JobResult): void {
   job.result = result;
   job.status = 'completed';
   job.stage = null;
+  for (const key of STAGE_KEYS) job.stages[key] = 'done';
   job.finishedAt = Date.now();
   job.updatedAt = job.finishedAt;
 }
