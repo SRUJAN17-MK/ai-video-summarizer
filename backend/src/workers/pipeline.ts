@@ -2,11 +2,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
 import { AppError, isAppError } from '../utils/errors.js';
-import { languageByCode } from '../utils/languages.js';
+import { languageByCode, languageName, detectLanguageFromScript } from '../utils/languages.js';
 import { safeUnlink } from '../utils/files.js';
 import { extractAudio, cleanSpeech, assertSpeechPresent, encodeSpeechAudio } from '../services/audioService.js';
 import { getVideoAsset } from '../services/videoService.js';
-import { transcribeAudio } from '../services/transcriptionService.js';
+import { transcribeAudio, cleanTranscript } from '../services/transcriptionService.js';
 import { generateSummary } from '../services/summarizationService.js';
 import { translateSummary } from '../services/translationService.js';
 import {
@@ -54,21 +54,47 @@ export async function processJob(jobId: string): Promise<void> {
     const rawWav = path.join(workDir, 'raw.wav');
     const cleanWav = path.join(workDir, 'clean.wav');
 
-    // --------------------------------------------------- extract audio ----
-    markStage(job, 'extract_audio', 'active');
-    await extractAudio(asset.filePath, rawWav);
-    markStage(job, 'extract_audio', 'done');
+    let transcript: any;
+    let cleaning: { notice: string } = { notice: 'Transcript retrieved from YouTube captions.' };
+    if (asset.transcriptText) {
+      // Caption-based source: no local media to decode or transcribe.
+      markStage(job, 'extract_audio', 'done');
+      markStage(job, 'clean_speech', 'done');
+      markStage(job, 'transcribe', 'active');
+      const cleanedText = cleanTranscript(asset.transcriptText);
+      if (!cleanedText || cleanedText.replace(/[^\p{L}\p{N}]+/gu, '').length < 2) {
+        throw new AppError('NO_SPEECH', { message: 'This YouTube video has captions, but no usable speech was found. Please upload the video file instead.' });
+      }
+      const languageCode =
+        asset.transcriptLanguageCode?.toLowerCase().split(/[-_]/)[0] ??
+        detectLanguageFromScript(cleanedText) ??
+        'en';
+      transcript = {
+        text: cleanedText,
+        segments: [],
+        languageCode,
+        languageName: languageName(languageCode),
+        languageConfidence: undefined,
+        durationSec: asset.durationSec,
+      };
+      markStage(job, 'transcribe', 'done');
+    } else {
+      // --------------------------------------------------- extract audio ----
+      markStage(job, 'extract_audio', 'active');
+      await extractAudio(asset.filePath, rawWav);
+      markStage(job, 'extract_audio', 'done');
 
-    // --------------------------------------------------- clean speech ----
-    markStage(job, 'clean_speech', 'active');
-    const cleaning = await cleanSpeech(rawWav, cleanWav);
-    await assertSpeechPresent(cleanWav);
-    markStage(job, 'clean_speech', 'done');
+      // --------------------------------------------------- clean speech ----
+      markStage(job, 'clean_speech', 'active');
+      cleaning = await cleanSpeech(rawWav, cleanWav);
+      await assertSpeechPresent(cleanWav);
+      markStage(job, 'clean_speech', 'done');
 
-    // ---------------------------------------------------- transcribe ----
-    markStage(job, 'transcribe', 'active');
-    const transcript = await transcribeAudio(cleanWav);
-    markStage(job, 'transcribe', 'done');
+      // ---------------------------------------------------- transcribe ----
+      markStage(job, 'transcribe', 'active');
+      transcript = await transcribeAudio(cleanWav);
+      markStage(job, 'transcribe', 'done');
+    }
 
     // ----------------------------------------------- detect language ----
     markStage(job, 'detect_language', 'active');
@@ -95,13 +121,17 @@ export async function processJob(jobId: string): Promise<void> {
     const notices: string[] = [cleaning.notice];
     let audioUrl: string | undefined;
     if (job.generateAudio) {
-      try {
-        const audioPath = await encodeSpeechAudio(cleanWav, job.id);
-        job.audioPath = audioPath;
-        audioUrl = `/api/jobs/${job.id}/audio`;
-      } catch (err) {
-        log.warn('speech-only audio generation failed', { err });
-        notices.push('Speech-only audio could not be generated for this video.');
+      if (asset.transcriptText) {
+        notices.push('Speech-only audio is not available for caption-based YouTube videos. Upload the video file if you need it.');
+      } else {
+        try {
+          const audioPath = await encodeSpeechAudio(cleanWav, job.id);
+          job.audioPath = audioPath;
+          audioUrl = `/api/jobs/${job.id}/audio`;
+        } catch (err) {
+          log.warn('speech-only audio generation failed', { err });
+          notices.push('Speech-only audio could not be generated for this video.');
+        }
       }
     }
 

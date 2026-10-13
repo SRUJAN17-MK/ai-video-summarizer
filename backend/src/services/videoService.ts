@@ -5,6 +5,7 @@ import { AppError } from '../utils/errors.js';
 import { probeMedia } from '../utils/ffmpeg.js';
 import { downloadVideo, assertSafeVideoUrl } from '../utils/ssrf.js';
 import { ALLOWED_VIDEO_MIMES, randomId, secureExtension, exists, formatDuration, formatBytes } from '../utils/files.js';
+import { isYouTubeUrl, fetchYouTubeTranscript } from './youtubeTranscriptService.js';
 
 export interface VideoAsset {
   id: string;
@@ -19,6 +20,8 @@ export interface VideoAsset {
   height?: number;
   origin: 'upload' | 'url';
   sourceUrl?: string;
+  transcriptText?: string;
+  transcriptLanguageCode?: string;
   createdAt: number;
 }
 
@@ -26,7 +29,9 @@ const assets = new Map<string, VideoAsset>();
 
 export function getVideoAsset(id: string): VideoAsset | undefined {
   const asset = assets.get(id);
-  if (!asset || !exists(asset.filePath)) return undefined;
+  if (!asset) return undefined;
+  if (asset.transcriptText) return asset;
+  if (!exists(asset.filePath)) return undefined;
   return asset;
 }
 
@@ -86,6 +91,28 @@ export async function storeUpload(file: { originalname: string; path: string; si
 }
 
 export async function storeFromUrl(rawUrl: string): Promise<VideoAsset> {
+  if (isYouTubeUrl(rawUrl)) {
+    const transcript = await fetchYouTubeTranscript(rawUrl);
+    const id = randomId();
+    const asset: VideoAsset = {
+      id,
+      originalName: transcript.title ?? `youtube-${transcript.videoId}.mp4`,
+      storedName: '',
+      filePath: '',
+      sizeBytes: 0,
+      durationSec: transcript.durationSec ?? 0,
+      durationLabel: formatDuration(transcript.durationSec ?? 0),
+      sizeLabel: 'YouTube captions',
+      origin: 'url',
+      sourceUrl: rawUrl.trim(),
+      transcriptText: transcript.text,
+      transcriptLanguageCode: transcript.languageCode,
+      createdAt: Date.now(),
+    };
+    assets.set(asset.id, asset);
+    return describe(asset);
+  }
+
   const url = await assertSafeVideoUrl(rawUrl);
   const id = randomId();
   const destination = path.join(config.files.uploadsDir, `url-${id}.bin`);
