@@ -159,6 +159,12 @@ export class OpenAICompatibleProvider implements AIProvider {
     return { summary, keyPoints };
   }
 
+  async summarizeVideo(): Promise<SummaryResult & { sourceLanguageCode?: string }> {
+    throw new AppError('AI_FAILED', {
+      message: 'Direct YouTube video input is supported only with the Gemini provider. Configure AI_PROVIDER=gemini with a valid GEMINI_API_KEY, or upload the video file.',
+    });
+  }
+
   // ---------------------------------------------------------- translation ----
   async translate(input: TranslationInput): Promise<SummaryResult> {
     const raw = await this.chat(translationPrompt(input), { json: true });

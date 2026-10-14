@@ -34,12 +34,17 @@ export class MockProvider implements AIProvider {
     };
   }
 
-  async summarize(): Promise<SummaryResult> {
+  async summarize(_input?: { transcript?: string; languageName?: string }): Promise<SummaryResult> {
     const sentences = this.transcript.match(/[^.]+\./g) ?? [this.transcript];
     return {
       summary: sentences.slice(0, 4).map((s) => s.trim()).join(' '),
       keyPoints: sentences.slice(1, 6).map((s) => s.trim()),
     };
+  }
+
+  async summarizeVideo(input: { videoUrl: string; languageName?: string }): Promise<SummaryResult & { sourceLanguageCode?: string }> {
+    const result = await this.summarize({ transcript: this.transcript });
+    return { ...result, sourceLanguageCode: 'en' };
   }
 
   async translate(input: TranslationInput): Promise<SummaryResult> {

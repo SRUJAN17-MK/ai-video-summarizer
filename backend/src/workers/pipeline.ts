@@ -3,6 +3,7 @@ import path from 'node:path';
 import { config } from '../config.js';
 import { AppError, isAppError } from '../utils/errors.js';
 import { languageByCode, languageName, detectLanguageFromScript } from '../utils/languages.js';
+import { getAIProvider } from '../services/ai/index.js';
 import { safeUnlink } from '../utils/files.js';
 import { extractAudio, cleanSpeech, assertSpeechPresent, encodeSpeechAudio } from '../services/audioService.js';
 import { getVideoAsset } from '../services/videoService.js';
@@ -55,6 +56,7 @@ export async function processJob(jobId: string): Promise<void> {
     const cleanWav = path.join(workDir, 'clean.wav');
 
     let transcript: any;
+    let precomputedSummary: { summary: string; keyPoints: string[] } | undefined;
     let cleaning: { notice: string } = { notice: 'Transcript retrieved from YouTube captions.' };
     if (asset.transcriptText) {
       // Caption-based source: no local media to decode or transcribe.
@@ -71,6 +73,26 @@ export async function processJob(jobId: string): Promise<void> {
         'en';
       transcript = {
         text: cleanedText,
+        segments: [],
+        languageCode,
+        languageName: languageName(languageCode),
+        languageConfidence: undefined,
+        durationSec: asset.durationSec,
+      };
+      markStage(job, 'transcribe', 'done');
+    } else if (asset.youtubeDirect) {
+      if (!asset.sourceUrl) {
+        throw new AppError('INVALID_URL', { message: 'This YouTube video URL is missing. Please paste it again.' });
+      }
+      markStage(job, 'extract_audio', 'done');
+      markStage(job, 'clean_speech', 'done');
+      markStage(job, 'transcribe', 'active');
+      const videoSummary = await getAIProvider().summarizeVideo({ videoUrl: asset.sourceUrl });
+      precomputedSummary = videoSummary;
+      cleaning = { notice: 'No accessible transcript; summary generated directly from the YouTube video.' };
+      const languageCode = videoSummary.sourceLanguageCode ?? detectLanguageFromScript(videoSummary.summary) ?? undefined;
+      transcript = {
+        text: '[Transcript unavailable; summary generated directly from the YouTube video by Gemini.]',
         segments: [],
         languageCode,
         languageName: languageName(languageCode),
@@ -109,7 +131,7 @@ export async function processJob(jobId: string): Promise<void> {
     markStage(job, 'summarize', 'active');
     const target = languageByCode(job.targetLanguageCode);
     if (!target) throw new AppError('INVALID_INPUT', { message: 'Please choose a valid target language.' });
-    const summary = await generateSummary(transcript.text, transcript.languageName);
+    const summary = precomputedSummary ?? (await generateSummary(transcript.text, transcript.languageName));
     markStage(job, 'summarize', 'done');
 
     // ------------------------------------------------------ translate ----
@@ -121,8 +143,8 @@ export async function processJob(jobId: string): Promise<void> {
     const notices: string[] = [cleaning.notice];
     let audioUrl: string | undefined;
     if (job.generateAudio) {
-      if (asset.transcriptText) {
-        notices.push('Speech-only audio is not available for caption-based YouTube videos. Upload the video file if you need it.');
+      if (asset.transcriptText || asset.youtubeDirect) {
+        notices.push('Speech-only audio is not available for this YouTube video.');
       } else {
         try {
           const audioPath = await encodeSpeechAudio(cleanWav, job.id);

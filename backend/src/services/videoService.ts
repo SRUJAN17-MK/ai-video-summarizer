@@ -22,6 +22,7 @@ export interface VideoAsset {
   sourceUrl?: string;
   transcriptText?: string;
   transcriptLanguageCode?: string;
+  youtubeDirect?: boolean;
   createdAt: number;
 }
 
@@ -30,7 +31,7 @@ const assets = new Map<string, VideoAsset>();
 export function getVideoAsset(id: string): VideoAsset | undefined {
   const asset = assets.get(id);
   if (!asset) return undefined;
-  if (asset.transcriptText) return asset;
+  if (asset.transcriptText || asset.youtubeDirect) return asset;
   if (!exists(asset.filePath)) return undefined;
   return asset;
 }
@@ -92,21 +93,28 @@ export async function storeUpload(file: { originalname: string; path: string; si
 
 export async function storeFromUrl(rawUrl: string): Promise<VideoAsset> {
   if (isYouTubeUrl(rawUrl)) {
-    const transcript = await fetchYouTubeTranscript(rawUrl);
+    let transcript;
+    try {
+      transcript = await fetchYouTubeTranscript(rawUrl);
+    } catch {
+      transcript = undefined;
+    }
+
     const id = randomId();
     const asset: VideoAsset = {
       id,
-      originalName: transcript.title ?? `youtube-${transcript.videoId}.mp4`,
+      originalName: transcript?.title ?? 'youtube-video',
       storedName: '',
       filePath: '',
       sizeBytes: 0,
-      durationSec: transcript.durationSec ?? 0,
-      durationLabel: formatDuration(transcript.durationSec ?? 0),
-      sizeLabel: 'YouTube captions',
+      durationSec: transcript?.durationSec ?? 0,
+      durationLabel: formatDuration(transcript?.durationSec ?? 0),
+      sizeLabel: transcript ? 'YouTube captions' : 'YouTube direct',
       origin: 'url',
       sourceUrl: rawUrl.trim(),
-      transcriptText: transcript.text,
-      transcriptLanguageCode: transcript.languageCode,
+      transcriptText: transcript?.text,
+      transcriptLanguageCode: transcript?.languageCode,
+      youtubeDirect: !transcript,
       createdAt: Date.now(),
     };
     assets.set(asset.id, asset);

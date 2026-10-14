@@ -34,5 +34,7 @@ export interface AIProvider {
   readonly name: string;
   transcribe(audioPath: string, opts?: { timeoutMs?: number }): Promise<TranscriptionResult>;
   summarize(input: { transcript: string; languageName?: string }): Promise<SummaryResult>;
+  /** Direct Gemini video input (e.g. public YouTube URLs) when no transcript is available. */
+  summarizeVideo(input: { videoUrl: string; languageName?: string }): Promise<SummaryResult & { sourceLanguageCode?: string }>;
   translate(input: TranslationInput): Promise<SummaryResult>;
 }

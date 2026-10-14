@@ -39,7 +39,7 @@ export class GeminiProvider implements AIProvider {
   // ------------------------------------------------------- generateContent ----
   private async generateContent(
     prompt: string,
-    opts: { json: boolean; model?: string; timeoutMs?: number; inlineAudio?: { data: string; mime: string }; systemInstruction?: boolean },
+    opts: { json: boolean; model?: string; timeoutMs?: number; inlineAudio?: { data: string; mime: string }; fileData?: { uri: string; mime: string }; systemInstruction?: boolean },
   ): Promise<string> {
     const model = opts.model ?? this.cfg.model;
     const timeoutMs = opts.timeoutMs ?? this.cfg.timeoutMs;
@@ -47,6 +47,7 @@ export class GeminiProvider implements AIProvider {
 
     const parts: Array<Record<string, unknown>> = [];
     if (opts.inlineAudio) parts.push({ inline_data: { mime_type: opts.inlineAudio.mime, data: opts.inlineAudio.data } });
+    if (opts.fileData) parts.push({ file_data: { file_uri: opts.fileData.uri, mime_type: opts.fileData.mime } });
     parts.push({ text: prompt });
 
     const body: Record<string, unknown> = {
@@ -182,6 +183,32 @@ export class GeminiProvider implements AIProvider {
     }
 
     return { text, segments, language, durationSec };
+  }
+
+  async summarizeVideo(input: { videoUrl: string; languageName?: string }): Promise<SummaryResult & { sourceLanguageCode?: string }> {
+    const raw = await this.generateContent(
+      `You are an expert video content analyst. Analyze the provided YouTube video and produce a genuinely useful summary.
+
+Requirements:
+- Understand the whole video and identify the main topic.
+- Preserve important facts, numbers, names, dates and technical terms.
+- Never invent information that is not present in the video.
+- ${input.languageName ? `Write the summary and key points in ${input.languageName}.` : 'Write the summary and key points in the language of the video.'}
+
+Respond with ONLY a JSON object in exactly this shape:
+{"summary": "3-5 concise sentences describing the video", "keyPoints": ["3-7 important points, each a single line"], "language": "ISO 639-1 code of the video's spoken language"}`,
+      { json: true, fileData: { uri: input.videoUrl, mime: 'video/mp4' } },
+    );
+    const parsed = parseJsonObject(raw);
+    const summary = typeof parsed?.summary === 'string' ? parsed.summary.trim() : '';
+    const keyPoints = Array.isArray(parsed?.keyPoints)
+      ? parsed.keyPoints.filter((p: unknown): p is string => typeof p === 'string' && p.trim().length > 0).map((p: string) => p.trim())
+      : [];
+    if (!summary) {
+      throw new AppError('AI_FAILED', { message: 'The Gemini API returned an empty video summary. Please try again.' });
+    }
+    const sourceLanguageCode = typeof parsed?.language === 'string' && parsed.language.trim() ? parsed.language.trim().toLowerCase() : undefined;
+    return { summary, keyPoints, sourceLanguageCode };
   }
 
   // -------------------------------------------------------- summarization ----
