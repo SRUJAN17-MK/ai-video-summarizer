@@ -5,7 +5,9 @@ import rateLimit from 'express-rate-limit';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { config } from './config.js';
+import { config, ensureTmpDirs } from './config.js';
+try { ensureTmpDirs(); } catch { /* ignore in read-only serverless environments */ }
+
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { videoRoutes } from './routes/videoRoutes.js';
@@ -97,3 +99,6 @@ export function createApp(): Express {
   app.use(errorHandler);
   return app;
 }
+
+const app = createApp();
+export default app;

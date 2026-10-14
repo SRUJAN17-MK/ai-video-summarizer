@@ -24,3 +24,5 @@ logs/
 # generated test fixtures (regenerate with scripts/generate-samples.ps1)
 testdata/*.wav
 testdata/ui-*.png
+
+.vercel

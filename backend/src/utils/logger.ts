@@ -49,18 +49,25 @@ if (config.log.console) {
 }
 
 if (config.log.file) {
-  fs.mkdirSync(config.log.dir, { recursive: true });
-  const file = (filename: string, fileLevel: string) =>
-    new winston.transports.File({
-      filename: path.join(config.log.dir, filename),
-      level: fileLevel,
-      format: jsonFormat,
-      maxsize: 5 * 1024 * 1024,
-      maxFiles: 3,
-      tailable: true,
-    });
-  transports.push(file('app.log', level));
-  transports.push(file('error.log', 'error'));
+  try {
+    fs.mkdirSync(config.log.dir, { recursive: true });
+    const file = (filename: string, fileLevel: string) =>
+      new winston.transports.File({
+        filename: path.join(config.log.dir, filename),
+        level: fileLevel,
+        format: jsonFormat,
+        maxsize: 5 * 1024 * 1024,
+        maxFiles: 3,
+        tailable: true,
+      });
+    transports.push(file('app.log', level));
+    transports.push(file('error.log', 'error'));
+  } catch (err) {
+    // Serverless/read-only environments may not allow log files: fall back to console only.
+    if (!transports.some((t) => t instanceof winston.transports.Console)) {
+      transports.push(new winston.transports.Console({ level, format: winston.format.combine(winston.format.colorize(), humanFormat) }));
+    }
+  }
 }
 
 export const logger = winston.createLogger({
